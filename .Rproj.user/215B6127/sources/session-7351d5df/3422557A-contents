@@ -1,0 +1,116 @@
+---
+title: "Final project2"
+author: "Yuchen li"
+date: "2025-02-21"
+output: html_document
+---
+# Introduction
+# This analysis explores the key factors influencing diabetes using the Pima Indians Diabetes Dataset.  
+# We examine correlations between glucose, BMI, blood pressure, insulin, age, and diabetes outcomes  
+# to identify significant risk factors and visualize their relationships.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(mice)
+library(car)
+library(caret)
+library(ggplot2)
+library(knitr)
+library(tidyr)
+```
+
+## Data description 
+```{r}
+file_path <- "diabetes.csv"
+diabetes <- read.csv(file_path)
+
+# Data pre-processing
+
+diabetes$BMI[diabetes$BMI == 0] <- NA
+diabetes$Glucose[diabetes$Glucose == 0] <- NA
+diabetes$BloodPressure[diabetes$BloodPressure == 0] <- NA
+
+clean_diabetes <- diabetes %>% 
+  filter(!is.na(Glucose)) %>% 
+  filter(!is.na(BloodPressure)) %>% 
+  filter(!is.na(BMI))
+
+str(diabetes)
+dim(diabetes)
+summary(diabetes)
+```
+
+```{r}
+summary_table <- clean_diabetes %>%
+  summarise(
+    Mean_Glucose = mean(Glucose, na.rm = TRUE),
+    SD_Glucose = sd(Glucose, na.rm = TRUE),
+    Mean_BMI = mean(BMI, na.rm = TRUE),
+    SD_BMI = sd(BMI, na.rm = TRUE),
+    Mean_BloodPressure = mean(BloodPressure, na.rm = TRUE),
+    SD_BloodPressure = sd(BloodPressure, na.rm = TRUE),
+    Mean_Age = mean(Age, na.rm = TRUE),
+    SD_Age = sd(Age, na.rm = TRUE)
+  )
+summary_table
+kable(summary_table, caption = "Summary of Key Variables")
+```
+
+### Summary Table Description
+
+"The summary table presents the mean and standard deviation (SD) of key variables in the cleaned diabetes dataset. 
+It provides an overview of the dataset's distribution and helps in understanding variable characteristics."
+- **Glucose:** Mean = 121.88, SD = 30.75  
+- **BMI:** Mean = 32.47, SD = 6.89  
+- **Blood Pressure:** Mean = 72.40, SD = 12.38  
+- **Age:** Mean = 33.35, SD = 11.76 
+
+
+```{r}
+correlation_table <- clean_diabetes %>%
+  summarise(
+    Cor_Glucose = cor(Glucose, Outcome, use = "complete.obs"),
+    Cor_BMI = cor(BMI, Outcome, use = "complete.obs"),
+    Cor_BloodPressure = cor(BloodPressure, Outcome, use = "complete.obs"),
+    Cor_Insulin = cor(Insulin, Outcome, use = "complete.obs"),
+    Cor_Age = cor(Age, Outcome, use = "complete.obs")
+  )
+correlation_table
+kable(correlation_table, 
+      caption = "Correlation between Key Variables and Diabetes Outcome",
+      digits = 3)
+```
+
+### Correlation Table Description
+
+"The correlation table shows the relationship between key variables and diabetes outcome.
+Glucose has the strongest correlation with diabetes, followed by BMI, while other variables show weaker associations."
+- **Glucose (0.488):** Moderate positive correlation with diabetes.  
+- **BMI (0.299):** Weak positive correlation.  
+- **Blood Pressure (0.166), Insulin (0.145), Age (0.246):** Weak correlations.
+
+```{r}
+long_data <- clean_diabetes %>%
+  select(Glucose, BMI, BloodPressure, Insulin, SkinThickness, Age, Outcome) %>%
+  pivot_longer(cols = -Outcome, names_to = "Variable", values_to = "Value")
+
+ggplot(long_data, aes(x = as.factor(Outcome), y = Value, fill = as.factor(Outcome))) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~ Variable, scales = "free") + 
+  theme_minimal() +
+  labs(title = "Distribution of Key Variables by Diabetes Outcome",
+       x = "Diabetes Outcome (0: No, 1: Yes)", y = "Value", fill = "Outcome")
+```
+### Boxplot Description
+
+"The boxplot visualizes the distribution of key variables across diabetes outcomes (0: No diabetes, 1: Diabetes). 
+It shows that individuals with diabetes tend to have higher glucose, BMI, and age compared to those without diabetes.
+Blood pressure, insulin, and skin thickness also exhibit variations between the two groups, but with less pronounced differences."
+
+
+
+

@@ -1,0 +1,271 @@
+---
+title: "Final Presentation"
+author: "Grace Guo, Brain Li, Alley Wu"
+date: "2023-11-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(mice)
+library(car)
+library(caret)
+library(ggplot2)
+```
+
+## Data description 
+```{r}
+diabetes <- read_csv("diabetes.csv")
+
+# data description
+dim(diabetes)
+summary(diabetes)
+
+```
+## Data visualization
+```{r}
+
+pairs(~ Pregnancies + Glucose + BloodPressure + SkinThickness + Insulin + BMI + 
+        DiabetesPedigreeFunction + Age, data = diabetes, pch = 20, cex = 1)
+
+# clean dataset - if the missing val (0) < 20%
+hist(diabetes$Insulin)
+plot(sort(diabetes$Insulin))
+
+hist(diabetes$BMI)
+plot(sort(diabetes$BMI))#need to clean
+
+hist(diabetes$Glucose)
+plot(sort(diabetes$Glucose))#need to clean
+
+hist(diabetes$BloodPressure)
+plot(sort(diabetes$BloodPressure))#need to clean
+
+hist(diabetes$SkinThickness)
+plot(sort(diabetes$SkinThickness))
+
+hist(diabetes$Outcome)
+
+```
+
+
+# Data pre-processing
+```{r}
+diabetes$BMI[diabetes$BMI == 0] <- NA
+diabetes$Glucose[diabetes$Glucose == 0] <- NA
+diabetes$BloodPressure[diabetes$BloodPressure == 0] <- NA
+#diabetes$SkinThickness[diabetes$SkinThickness == 0] <- NA
+#diabetes$Insulin[diabetes$Insulin == 0] <- NA
+
+
+# Filter for variables with missing values greater than 20%.
+missing_pct <- colMeans(is.na(diabetes))
+vars_to_drop <- names(which(missing_pct > 0.2))
+clean_diabetes <- diabetes[, !names(diabetes) %in% vars_to_drop]
+
+clean_diabetes
+
+
+# Fill in missing values
+imp_model <- mice(clean_diabetes, m = 5, maxit = 50, seed = 12345)
+imputed_diabetes <- complete(imp_model)
+
+imputed_diabetes
+
+
+#clean_diabetes <- diabetes %>% 
+#  filter(!is.na(Glucose)) %>% 
+#  filter(!is.na(BloodPressure)) %>% 
+#  filter(!is.na(BMI))
+
+```
+>  Variables left after screening: Pregnancies, Glucose,BloodPressure, BMI, DiabetesPedigreeFunction, Age, Outcome,
+
+
+## Multicollinearity test
+```{r}
+# initial fit:logistic regression
+diabetes_model <- glm(Outcome ~Pregnancies+Glucose+BloodPressure+ BMI+ DiabetesPedigreeFunction+ Age+Insulin+ SkinThickness, data = imputed_diabetes, family = binomial)
+
+
+# Correlation coefficient
+cor_matrix <- cor(imputed_diabetes[, c("Pregnancies", "Glucose", "BloodPressure","BMI","DiabetesPedigreeFunction","Age","Insulin","SkinThickness")])
+
+# VIF value
+vif_vals <- vif(diabetes_model)
+
+cor_threshold <- 0.8
+vif_threshold <- 10
+
+# Determine whether multicollinearity exists and filter out variables
+if (any(abs(cor_matrix) > cor_threshold & diag(cor_matrix) != 1)) {
+  
+  high_cor_vars <- colnames(cor_matrix)[apply(abs(cor_matrix) > cor_threshold & diag(cor_matrix) != 1, 2, any)]
+  selected_vars <- setdiff(colnames(imputed_diabetes), high_cor_vars)
+} else if (any(vif_vals > vif_threshold)) {
+  
+  high_vif_vars <- names(vif_vals[vif_vals > vif_threshold])
+  selected_vars <- setdiff(colnames(imputed_diabetes), high_vif_vars)
+} else {
+  selected_vars <- colnames(imputed_diabetes)
+}
+
+selected_vars
+
+```
+> There is no multicollinearity among the 9 variables
+
+
+# parameter estimation
+```{r}
+# logistic model 
+diabetes_model <- glm(Outcome ~Pregnancies+Glucose+BloodPressure+ BMI+ DiabetesPedigreeFunction+ Age+Insulin+ SkinThickness, data = imputed_diabetes, family = binomial)
+# parameter estimation of the logistic model
+summary(diabetes_model)
+ 
+```
+
+
+
+## Model Evaluation
+```{r}
+# K-fold
+
+## Convert Outcome to binary factor
+imputed_diabetes$Outcome <- factor(imputed_diabetes$Outcome, levels = c(0, 1))
+
+## Use the train function to fit the logistic regression model and perform K-fold cross validation
+diabetes_model_evaluatoin <- train(Outcome ~ ., 
+                        data = imputed_diabetes, 
+                        method = "glm", 
+                        trControl = trainControl(method = "cv", number = 10),
+                        family = binomial)
+
+diabetes_model_evaluatoin
+
+## If Outcome is not converted into a categorical variable, this warning will appear：
+## Warning: You are trying to do regression and your outcome only has two possible values Are you trying to do classification? If so, use a 2 level factor as your outcome column.
+
+
+
+# Confusion Matrix
+imputed_diabetes$Outcome <- factor(imputed_diabetes$Outcome, levels = c(0, 1))
+## test set
+features <- imputed_diabetes[, -which(names(imputed_diabetes) == "Outcome")]
+labels <- imputed_diabetes$Outcome
+
+set.seed(2023)  
+trainIndex <- createDataPartition(y = labels, p = 0.7, list = FALSE)
+train_data <- features[trainIndex, ]
+test_data <- features[-trainIndex, ]
+train_labels <- labels[trainIndex]
+test_labels <- labels[-trainIndex]
+
+## Predict the results on the test set
+
+test_predict=predict(diabetes_model, newdata = test_data, type = "response")
+test_predict_binary <- ifelse(test_predict > 0.5, 1, 0)
+
+confusion_matrix <- table(test_predict_binary, test_labels)
+print(confusion_matrix)
+
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+print(paste("Accuracy:", accuracy))
+
+
+## Visualizing the confusion matrix
+confusion_df <- as.data.frame.matrix(confusion_matrix)
+confusion_df <- cbind(Var1 = rownames(confusion_df), confusion_df)
+confusion_df <- reshape2::melt(confusion_df, id.vars = "Var1")
+
+ggplot(data = confusion_df, aes(x = Var1, y = variable)) +
+  geom_tile(aes(fill = value), color = "white") +  
+  scale_fill_gradient(low = rgb(0.859, 0.192, 0.141), high = rgb(1, 0.874, 0.573)) +  
+  geom_text(aes(label = value)) +  
+  labs(title = "Confusion Matrix", x = "Actual Value", y = "Predicted Value") +  
+  theme_bw()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+```
+There are 768 samples in the sample data, including 8 independent variables and 2 categories, which are 0 and 1 respectively, indicating not suffering from diabetes and having diabetes. When evaluating the classification model, we used 10-fold cross-validation, which means randomly dividing the data set into 10 non-overlapping subsets, using 9 subsets each time as training data, and the remaining 1 subset as test data. , and repeat this process 10 times.
+
+The results of k-fold cross-validation show that the accuracy of this model is 0.7695 and the Kappa coefficient is 0.4639. Accuracy is one of the most commonly used evaluation indicators in classification models. It represents the proportion of correctly classified samples among all samples. In this model, about 77% of the test samples were correctly classified. When the class distribution is uneven, the Kappa coefficient is a more comprehensive measure that takes into account the random chance of classification and takes accuracy into account. In this model, the Kappa coefficient is 0.4639, which means that the model's performance is slightly below the level of random guessing.
+
+Additionally, we can see the results of the confusion matrix. In this model, 130 of the samples with a predicted result of 0 (not suffering from diabetes) were correctly classified and 41 were incorrectly classified; among the samples with a predicted result of 1 (with diabetes), 39 were correctly classified. 20 were misclassified. By looking at the confusion matrix, we can better understand how the model performs on different categories.
+
+(需要优化模型)
+
+
+
+```{r}
+logit_model <- glm(Outcome ~ Pregnancies + Glucose + BloodPressure + SkinThickness 
+                   + Insulin + BMI + DiabetesPedigreeFunction + Age, 
+                   data = imputed_diabetes, family = binomial)  
+  
+summary(logit_model)
+
+```
+
+
+# PCA 
+```{r}
+
+# 找到测试集合数据  保留 因变量
+test_data2 <- imputed_diabetes[-trainIndex, ]  
+
+## 主成分分析  对每个成分打分，来评估变量的对数据的贡献
+pca_model <- prcomp(imputed_diabetes[, c("Pregnancies", "Glucose", "BloodPressure","BMI","DiabetesPedigreeFunction","Age","Insulin","SkinThickness")], scale. = TRUE)  
+
+# 将每个成分的贡献分数 与因变量组成一个data frame，作为训练集  
+train_data_pca <-data.frame(predict(pca_model, imputed_diabetes[,c("Pregnancies", "Glucose", "BloodPressure","BMI","DiabetesPedigreeFunction","Age","Insulin","SkinThickness")]),Outcome=imputed_diabetes$Outcome) 
+
+# 将每个成分的贡献分数 测试集合因变量组成一个data frame，作为测试集  
+test_data_pca <- data.frame(predict(pca_model, test_data2[, c("Pregnancies", "Glucose", "BloodPressure","BMI","DiabetesPedigreeFunction","Age","Insulin","SkinThickness")]),Outcome=test_data2$Outcome)
+
+# 重新建立逻辑回归模型 ，使用 转换好的数据 重新做 逻辑回归 
+model_pca <- glm(Outcome ~ ., data = train_data_pca, family = "binomial")
+
+# 模型评估
+test_data_pca$predictions_pca <- predict(model_pca, newdata = test_data_pca, type = "response")
+# 绘制ROC曲线 找到一个合适的阈值，期望FPR在0.05附近，根据ROC曲线图，于是找到0.74
+library(ROCR)
+pred<-prediction(test_data_pca$predictions_pca,test_data_pca$Outcome)
+perf<-performance(pred,"tpr","fpr")
+  plot(perf,colorize = T,print.cutoffs.at = seq(0.1,by = 0.1),
+       lwd=4, axes = F,ylab="TPR",xlab="FPR")#colorize.palette=colpla[1:4]
+  axis(side = 1 ,col=7)
+  axis(side = 2,col=7 )
+  grid()
+
+
+test_predict_binary2 <- ifelse(test_data_pca$predictions_pca > 0.7, 1, 0)
+test_data_pca$pred1<-test_predict_binary2
+ confusionMatrix_pca=confusionMatrix(factor(test_data_pca$pred1),test_data_pca$Outcome)
+ #  see accuracy
+print( confusionMatrix_pca$overall[1])
+
+```
+## KNN
+
+```{r}
+
+library(class)
+
+knn_model <- knn(train = imputed_diabetes[, c("Pregnancies", "Glucose", "BloodPressure","BMI","DiabetesPedigreeFunction","Age","Insulin","SkinThickness")], 
+                  test = test_data2[,c("Pregnancies", "Glucose", "BloodPressure","BMI","DiabetesPedigreeFunction","Age","Insulin","SkinThickness")],
+                  cl = imputed_diabetes$Outcome, k = 3)
+
+# 模型评估
+conf_matrix_knn <- confusionMatrix(knn_model, test_data2$Outcome)
+print( conf_matrix_knn$overall["Accuracy"])
+
+
+
+
+```

@@ -1,0 +1,3 @@
+"0","kable(correlation_table, "
+"0","      caption = ""Correlation between Key Variables and Diabetes Outcome"","
+"0","      digits = 3)"
