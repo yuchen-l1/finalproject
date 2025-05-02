@@ -25,8 +25,8 @@ library(tidyr)
 
 ## Data description 
 ```{r}
-file_path <- "/Users/Brian/Desktop/final/data/diabetes.csv"
-diabetes <- read.csv(file_path)
+file_path <- "data/diabetes.csv"
+diabetes  <- read.csv(file_path)
 
 # Data pre-processing
 
